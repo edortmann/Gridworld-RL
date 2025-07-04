@@ -2,6 +2,7 @@ import numpy as np
 import ipywidgets as widgets
 from IPython.display import display
 from PIL import Image
+from contextlib import ExitStack
 from .envs import InteractiveGridEnv, ExtendedGridEnv
 from .qlearning import q_learning
 from .vis import plot_q_learning_progress, show_q_heatmap, make_video_from_frames
@@ -70,7 +71,7 @@ def launch_player_demo(rows=5, cols=5, **env_kwargs):
     reveal_btn.observe(on_reveal, "value")
 
     # layout
-    btn_row = widgets.HBox([left_btn, up_btn, down_btn, right_btn, reset_btn, randomize_btn, reveal_btn])
+    btn_row = widgets.HBox([left_btn, up_btn, down_btn, right_btn, reset_btn, reveal_btn, randomize_btn])
     ui = widgets.VBox([btn_row, env.canvas, status])
 
     env.render()
@@ -99,9 +100,9 @@ def create_tile_selectors(rows, cols, preset, preset_configs):
             for r in range(rows)
         ]
 
-    tile_types = ["", "Start", "Eis", "Abpraller", "Grube", "Mauer", "Klebriger Schlamm", "Förderband (oben)", "Förderband (unten)",
-                  "Förderband (links)", "Förderband (rechts)", "Trampolin", "Wind", "Portal", "Einstürzender Boden",
-                  "Maut-Tor", "Batterie", "Zeit-Juwel", "Ziel"]
+    tile_types = ["", "Abpraller", "Batterie", "Einstürzender Boden", "Eis", "Förderband (links)", "Förderband (oben)",
+                  "Förderband (rechts)", "Förderband (unten)", "Grube", "Klebriger Schlamm", "Mauer",
+                  "Maut-Tor", "Portal", "Start", "Trampolin", "Wind", "Zeit-Juwel", "Ziel"]
     dd_layout = widgets.Layout(width='130px')  # erhöhte Breite, damit lange Namen nicht abgeschnitten werden
 
     grid_rows, selectors_2d = [], []
@@ -310,24 +311,72 @@ def launch_training_lab():
 
     # Helfer, der ein Preset‑Dictionary auf die Widgets anwendet
     def _apply_preset(cfg_name):
-        preset_dropdown.value = cfg_name
         cfg = preset_configs[cfg_name]
+        #rows_widget.unobserve(update_tile_grid, names='value')
+        #cols_widget.unobserve(update_tile_grid, names='value')
+        #preset_dropdown.unobserve(update_tile_grid, names='value')
+        affected = [rows_widget, cols_widget, preset_dropdown] + list(_widget_vars.values())
+
+        with ExitStack() as es:
+            for w in affected:
+                es.enter_context(w.hold_trait_notifications())
+
+            for key, val in cfg.items():
+                if key in _widget_vars:
+                    _widget_vars[key].value = val
+
+            # bring the dropdown into sync *inside* the hold-block
+            preset_dropdown.value = cfg_name
+
         # alle Schieberegler / Skalar-Widgets aktualisieren
-        for k, v in cfg.items():
-            if k in _widget_vars:
-                _widget_vars[k].value = v
+        #try:
+        #    for k, v in cfg.items():
+        #        if k in _widget_vars:
+        #            _widget_vars[k].value = v
+        #    preset_dropdown.value = cfg_name
+        #finally:
+        #    rows_widget.observe(update_tile_grid, names='value')
+        #    cols_widget.observe(update_tile_grid, names='value')
+        #    preset_dropdown.observe(update_tile_grid, names='value')
+
         # Nach Ändern der Slider die Kachelmatrix neu aufbauen
-        # update_tile_grid(cfg.get("tile_grid"))
-        update_tile_grid(cfg.get("tile_grid"))
+        update_tile_grid(None)
+
+    # Funktion, um momentane Umgebung und Parameterwerte als neues Preset zu speichern
+    def _save_current_as_preset(_):
+        cfg = {name: w.value for name, w in _widget_vars.items()}
+
+        # momentane Umgebung speichern
+        rows, cols = rows_widget.value, cols_widget.value
+        cfg["tile_grid"] = [
+            [tile_selectors[r][c].value for c in range(cols)]
+            for r in range(rows)
+        ]
+
+        # finde passende Nummer zum Abspeichern
+        custom_ids = [
+            int(key.split("Custom Preset ")[1])
+            for key in preset_configs
+            if key.startswith("Custom Preset ") and key.split("Custom Preset ")[1].isdigit()
+        ]
+        next_id = max(custom_ids, default=0) + 1
+        preset_name = f"Custom Preset {next_id}"
+
+        # speichere Preset und aktualisiere Liste
+        preset_configs[preset_name] = cfg
+        preset_dropdown.options = list(preset_configs.keys())
+        preset_dropdown.value = preset_name
 
     preset_dropdown = widgets.Dropdown(options=list(preset_configs.keys()), value="Default", description="Umgebungs-Preset:", style={'description_width': 'initial'})
     apply_btn = widgets.Button(description="Anwenden", button_style="success", tooltip="Ausgewähltes Preset anwenden")
     reset_btn = widgets.Button(description="Zurücksetzen", button_style="warning", tooltip="Auf Standard zurücksetzen")
+    save_btn = widgets.Button(description="Speichern als Custom Preset", tooltip="Aktuelle Einstellungen als neues Preset sichern", icon="save", layout=widgets.Layout(width='300px'))
 
     apply_btn.on_click(lambda b: _apply_preset(preset_dropdown.value))
     reset_btn.on_click(lambda b: _apply_preset("Default"))
+    save_btn.on_click(_save_current_as_preset)
 
-    preset_box = widgets.HBox([preset_dropdown, apply_btn, reset_btn])
+    preset_box = widgets.HBox([preset_dropdown, apply_btn, reset_btn, save_btn])
 
     #tile_selectors = []  # 2D list (rows x cols) of Dropdown widgets
     tile_grid_container = widgets.VBox()
@@ -364,12 +413,11 @@ def launch_training_lab():
     train_button = widgets.Button(description='Trainiere Q-Learning-Agenten mit ausgewählten Parameter-Werten 🚀',
                                   layout=widgets.Layout(width='500px'))
 
-    # Button to kick off replaying training episodes
+    # Knopf um Trainings Episoden abzuspielen
     replay_button = widgets.Button(description='Wiederhole Trainingsepisoden', layout=widgets.Layout(width='500px'))
 
-    # Button to kick off test episode
-    test_button = widgets.Button(description='Testepisode mit ausgelerntem Agent',
-                                 layout=widgets.Layout(width='500px'))
+    # Knopf um Test Episode abzuspielen
+    test_button = widgets.Button(description='Testepisode mit ausgelerntem Agent', layout=widgets.Layout(width='500px'))
 
     # Anzeigebereich für das Training
     output1 = widgets.Output(layout={'border': '1px solid black', 'height': '550px', 'overflow': 'scroll'})
