@@ -2,172 +2,162 @@
 set -Eeuo pipefail
 
 # ---------------------------
-# Settings
+# Settings (edit if you like)
 # ---------------------------
-REPO_URL="https://github.com/edortmann/Gridworld-RL.git"
+REPO_URL="https://github.com/edortmann/Gridworld-RL"
 REPO_DIR="$HOME/Gridworld-RL"
 VENV_DIR="$HOME/.gridworld-venv"
 KERNEL_NAME="gridworld-venv"
 KERNEL_DISPLAY="Python (gridworld-venv)"
 TARGET_NOTEBOOK="gridworld_linux.ipynb"
+MINIFORGE_DIR="$HOME/.miniforge"
 
 # ---------------------------
 # Helpers
 # ---------------------------
-log() { printf "\033[1;32m[INFO]\033[0m %s\n" "$*"; }
+log()  { printf "\033[1;32m[INFO]\033[0m %s\n" "$*"; }
 warn() { printf "\033[1;33m[WARN]\033[0m %s\n" "$*"; }
-err() { printf "\033[1;31m[ERR ]\033[0m %s\n" "$*"; }
-die() { err "$*"; exit 1; }
+err()  { printf "\033[1;31m[ERR ]\033[0m %s\n" "$*"; }
+die()  { err "$*"; exit 1; }
 
-SUDO=""
-if [ "${EUID:-$(id -u)}" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
-  SUDO="sudo"
-fi
+have() { command -v "$1" >/dev/null 2>&1; }
 
-PM=""; PM_INSTALL=""
-if command -v apt-get >/dev/null 2>&1; then
-  PM="apt-get"; PM_INSTALL="$SUDO apt-get install -y"
-  $SUDO apt-get update -y || true
-elif command -v dnf >/dev/null 2>&1; then
-  PM="dnf"; PM_INSTALL="$SUDO dnf install -y"
-elif command -v yum >/dev/null 2>&1; then
-  PM="yum"; PM_INSTALL="$SUDO yum install -y"
-elif command -v pacman >/dev/null 2>&1; then
-  PM="pacman"; PM_INSTALL="$SUDO pacman -Sy --noconfirm"
-elif command -v zypper >/dev/null 2>&1; then
-  PM="zypper"; PM_INSTALL="$SUDO zypper install -y"
-else
-  warn "No known package manager (apt/dnf/yum/pacman/zypper) found. Skipping system package installs."
-fi
+download() {
+  # download URL -> dest
+  local url="$1" dest="$2"
+  if have curl; then
+    curl -L --fail -o "$dest" "$url"
+  elif have wget; then
+    wget -O "$dest" "$url"
+  else
+    # try Python stdlib as last resort
+    if have python3; then
+      python3 - "$url" "$dest" <<'PY'
+import sys,urllib.request
+url,dst=sys.argv[1],sys.argv[2]
+urllib.request.urlretrieve(url,dst)
+PY
+    else
+      die "Need curl or wget (or python3) to download: $url"
+    fi
+  fi
+}
 
-install_pkgs() {
-  # shellcheck disable=SC2086
-  [ -n "$PM" ] && $PM_INSTALL "$@" || warn "Cannot install $* automatically. Please install manually."
+ensure_python_with_venv() {
+  # Return path to a python3 that can create venvs (prints on stdout).
+  local py="${1:-$(command -v python3 || true)}"
+
+  if [ -n "$py" ] && "$py" - <<'PY' >/dev/null 2>&1
+import sys,ensurepip; assert sys.version_info[:2] >= (3,8)
+PY
+  then
+    echo "$py"; return 0
+  fi
+
+  log "System Python missing ensurepip or too old — installing a user-local Python via Miniforge."
+  # pick Miniforge installer for arch
+  local arch="$(uname -m)"
+  local os="Linux"
+  local mf_url=""
+  case "$arch" in
+    x86_64)  mf_url="https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-${os}-x86_64.sh" ;;
+    aarch64) mf_url="https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-${os}-aarch64.sh" ;;
+    *) die "Unsupported CPU arch: $arch (cannot auto-install Miniforge)";;
+  esac
+
+  mkdir -p "$MINIFORGE_DIR"
+  tmp_inst="$(mktemp)"
+  download "$mf_url" "$tmp_inst"
+  bash "$tmp_inst" -b -p "$MINIFORGE_DIR"
+  rm -f "$tmp_inst"
+
+  local forge_py="$MINIFORGE_DIR/bin/python3"
+  [ -x "$forge_py" ] || die "Miniforge install failed (no python at $forge_py)."
+  echo "$forge_py"
 }
 
 # ---------------------------
-# 1) Ensure Python, Git, and (critically) ensurepip/venv support
+# 1) Get a python that can create venvs (no sudo)
 # ---------------------------
-if ! command -v python3 >/dev/null 2>&1; then
-  log "Python3 not found — attempting installation."
-  case "$PM" in
-    apt-get) install_pkgs python3 python3-pip ;;  # venv handled separately below
-    dnf|yum) install_pkgs python3 python3-pip ;;
-    pacman)  install_pkgs python python-pip ;;
-    zypper)  install_pkgs python3 python3-pip ;;
-    *) die "Python3 is required but could not be installed automatically." ;;
-  esac
-fi
-
-if ! command -v git >/dev/null 2>&1; then
-  install_pkgs git
-fi
-
-# --- FIX: make sure ensurepip is present (Debian/Ubuntu split it out) ---
-PY_BIN="$(command -v python3)"
-if ! "$PY_BIN" - <<'PY' >/dev/null 2>&1
-import ensurepip
-PY
-then
-  log "ensurepip missing — installing venv support for your Python."
-  case "$PM" in
-    apt-get)
-      # Try generic first, then versioned (e.g., python3.12-venv)
-      install_pkgs python3-venv || {
-        ver="$("$PY_BIN" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')"
-        install_pkgs "python${ver}-venv" || die "Could not install python-venv package (tried python3-venv and python${ver}-venv)."
-      }
-      ;;
-    dnf|yum)
-      # Usually included with python3, but install if available
-      install_pkgs python3-venv || true
-      ;;
-    pacman)
-      # venv is part of python on Arch
-      :
-      ;;
-    zypper)
-      install_pkgs python3-venv || true
-      ;;
-    *)
-      warn "Unable to install venv support automatically. Please install your distro's python3-venv package."
-      ;;
-  esac
-fi
+PY_BIN="$(ensure_python_with_venv)"
+log "Using Python at: $PY_BIN"
 
 # ---------------------------
-# 2) Optional niceties (ffmpeg, emoji font)
-# ---------------------------
-case "$PM" in
-  apt-get)
-    install_pkgs ffmpeg || true
-    install_pkgs fontconfig || true
-    install_pkgs fonts-noto-color-emoji || true
-    ;;
-  dnf|yum)
-    install_pkgs ffmpeg || true
-    install_pkgs fontconfig || true
-    install_pkgs google-noto-emoji-color-fonts || true
-    ;;
-  pacman)
-    install_pkgs ffmpeg || true
-    install_pkgs fontconfig || true
-    install_pkgs noto-fonts-emoji || true
-    ;;
-  zypper)
-    install_pkgs ffmpeg || true
-    install_pkgs fontconfig || true
-    $PM_INSTALL noto-emoji-color-fonts || $PM_INSTALL google-noto-emoji-color-fonts || true
-    ;;
-esac
-command -v fc-cache >/dev/null 2>&1 && fc-cache -f || true
-
-# ---------------------------
-# 3) Create venv
+# 2) Create venv
 # ---------------------------
 if [ -d "$VENV_DIR" ]; then
-  warn "Existing venv at $VENV_DIR detected."
+  log "Using existing venv at $VENV_DIR"
 else
   log "Creating virtual environment at $VENV_DIR"
   "$PY_BIN" -m venv "$VENV_DIR"
 fi
 
 VENV_PY="$VENV_DIR/bin/python"
+VENV_PIP="$VENV_DIR/bin/pip"
 
 log "Upgrading pip/setuptools/wheel in venv…"
 "$VENV_PY" -m pip install --upgrade pip setuptools wheel >/dev/null
 
 # ---------------------------
-# 4) Install JupyterLab + requested packages in the venv
+# 3) Install JupyterLab + your requested packages (in venv)
 # ---------------------------
-log "Installing JupyterLab and widgets in the venv…"
+log "Installing JupyterLab, widgets, ipykernel…"
 "$VENV_PY" -m pip install -U \
   jupyterlab ipywidgets jupyterlab_widgets widgetsnbextension ipykernel >/dev/null
 
-# Useful libs for the notebook
+# Useful libs for the notebook (all user-space)
 "$VENV_PY" -m pip install -U numpy matplotlib pillow plotly moviepy imageio imageio-ffmpeg >/dev/null
 
 # ---------------------------
-# 5) Clone or update the repo
+# 4) Fetch repo (git if available, else zip download)
 # ---------------------------
-if [ -d "$REPO_DIR/.git" ]; then
+if [ -d "$REPO_DIR/.git" ] && have git; then
   log "Updating existing repo at $REPO_DIR"
   git -C "$REPO_DIR" pull --rebase
-else
+elif have git; then
   log "Cloning repo to $REPO_DIR"
-  git clone --depth 1 "$REPO_URL" "$REPO_DIR"
+  git clone --depth 1 "$REPO_URL".git "$REPO_DIR"
+else
+  log "git not found — downloading zip archive instead."
+  rm -rf "$REPO_DIR"
+  mkdir -p "$REPO_DIR"
+  # try main first, fallback to master
+  tmpzip="$(mktemp --suffix=.zip)"
+  if download "$REPO_URL/archive/refs/heads/main.zip" "$tmpzip"; then
+    :
+  elif download "$REPO_URL/archive/refs/heads/master.zip" "$tmpzip"; then
+    :
+  else
+    die "Failed to download repository archive."
+  fi
+  log "Extracting archive…"
+  "$VENV_PY" - <<PY "$tmpzip" "$REPO_DIR"
+import sys,zipfile,os,shutil
+zip_path, dest = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(zip_path) as z:
+    top = z.namelist()[0].rstrip('/')
+    z.extractall(os.path.dirname(dest))
+src = os.path.join(os.path.dirname(dest), top)
+if os.path.exists(dest):
+    shutil.rmtree(dest)
+shutil.move(src, dest)
+print("Extracted to", dest)
+PY
+  rm -f "$tmpzip"
 fi
 
 cd "$REPO_DIR"
 
-# If requirements.txt exists, install it into the venv
+# ---------------------------
+# 5) Install repo requirements (if present) into the venv
+# ---------------------------
 if [ -f requirements.txt ]; then
-  log "Installing Python dependencies from requirements.txt in the venv…"
+  log "Installing Python dependencies from requirements.txt…"
   "$VENV_PY" -m pip install -r requirements.txt
 fi
 
 # ---------------------------
-# 6) Register the venv as a kernel
+# 6) Register the venv as a Jupyter kernel (user scope)
 # ---------------------------
 log "Registering Jupyter kernel: $KERNEL_NAME"
 "$VENV_PY" -m ipykernel install --user \
@@ -175,7 +165,7 @@ log "Registering Jupyter kernel: $KERNEL_NAME"
   --display-name "$KERNEL_DISPLAY" >/dev/null
 
 # ---------------------------
-# 7) Launch JupyterLab from the venv
+# 7) Launch JupyterLab from the venv (open notebook if present)
 # ---------------------------
 NB_TO_OPEN="$TARGET_NOTEBOOK"
 if [ ! -f "$NB_TO_OPEN" ]; then
