@@ -145,7 +145,7 @@ def launch_training_lab():
                                                    description='Grid Reihen')
     cols_widget, _, cols_row = _make_slider_with_text(is_int=True, value=5, min=4, max=10, step=1,
                                                    description='Grid Spalten')
-    # ---- Ziel-/Grube-/Schritt-Belohungen --------------------------------------
+    # ---- Ziel-/Grube-/Schritt-Belohnungen --------------------------------------
     reward_goal_widget, _, reward_goal_row = _make_slider_with_text(is_int=False, value=10.0, min=0.0, max=50.0, step=1.0,
                                                                  description='Ziel-Belohnung')
     reward_pit_widget, _, reward_pit_row = _make_slider_with_text(is_int=False, value=-10.0, min=-50.0, max=0.0, step=1.0,
@@ -163,6 +163,13 @@ def launch_training_lab():
                                                                              description='Trampolin-Belohnung')
     reward_toll_widget, _, reward_toll_row = _make_slider_with_text(is_int=False, value=-3.0, min=-10.0, max=0.0, step=0.1,
                                                                  description='Maut-Tor-Bestrafung')
+    # ---- Zeit-Juwel -----------------------------------------------------
+    reward_jewel_pos_widget, _, reward_jewel_pos_row = _make_slider_with_text(is_int=False, value=3.0, min=0.0, max=10.0, step=0.1,
+                                                                    description='Zeit-Juwel-Belohnung')
+    reward_jewel_neg_widget, _, reward_jewel_neg_row = _make_slider_with_text(is_int=False, value=-1.0, min=-10.0, max=0.0, step=0.1,
+                                                                    description='Zeit-Juwel-Bestrafung')
+    jewel_steps_widget, _, jewel_steps_row = _make_slider_with_text(is_int=True, value=10, min=0, max=1000, step=1,
+                                                                    description='Zeit-Juwel Schritte bis Bestrafung')
     # ---- simple flags / seed --------------------------------------------
     battery_required_widget = widgets.Checkbox(value=False, description='Agent braucht Batterie für Ziel', indent=True)
     rng_seed_widget, _, rng_seed_row = _make_slider_with_text(is_int=True, value=0, min=0, max=65535, step=1,
@@ -174,6 +181,7 @@ def launch_training_lab():
         reward_wall_row, reward_sticky_row,
         reward_trampoline_row, reward_toll_row,
         battery_required_widget,
+        reward_jewel_pos_row, reward_jewel_neg_row, jewel_steps_row,
         rng_seed_row
     ], layout=box_layout)
 
@@ -298,13 +306,14 @@ def launch_training_lab():
             "num_episodes_widget": 650, "max_steps_widget": 140,
             "alpha_widget": 0.11, "epsilon_widget": 0.22,
             "reward_step_widget": -0.08, "reward_wall_widget": -1.2,
+            "reward_jewel_pos_widget": 5.0, "reward_jewel_neg_widget": -3.0, "jewel_steps_widget": 10,
             "tile_grid": [
-                ["", "Mauer", "", "Abpraller", "", ""],
+                ["", "Mauer", "", "Abpraller", "", "Zeit-Juwel"],
                 ["", "Mauer", "", "Klebriger Schlamm", "", ""],
-                ["Zeit-Juwel", "", "", "Förderband (links)", "Förderband (links)", ""],
+                ["", "", "Förderband (oben)", "Förderband (links)", "Förderband (links)", ""],
                 ["", "Mauer", "Mauer", "Mauer", "", ""],
-                ["", "", "", "", "", ""],
-                ["", "", "", "", "", "Ziel"],
+                ["", "Mauer", "", "", "", ""],
+                ["Zeit-Juwel", "Mauer", "", "", "", "Ziel"],
             ],
         },
     }
@@ -476,6 +485,9 @@ def launch_training_lab():
             reward_sticky=env_params['reward_sticky'],
             reward_trampoline=env_params['reward_trampoline'],
             reward_toll=env_params['reward_toll'],
+            reward_jewel_pos=env_params['reward_jewel_pos'],
+            reward_jewel_neg=env_params['reward_jewel_neg'],
+            jewel_steps=env_params['jewel_steps'],
             battery_required=env_params['battery_required'],
             goal_position=goal_pos,
             rng_seed=env_params['rng_seed'],
@@ -611,6 +623,9 @@ def launch_training_lab():
             'reward_sticky': reward_sticky_widget.value,
             'reward_trampoline': reward_trampoline_widget.value,
             'reward_toll': reward_toll_widget.value,
+            'reward_jewel_pos':  reward_jewel_pos_widget.value,
+            'reward_jewel_neg': reward_jewel_neg_widget.value,
+            'jewel_steps': jewel_steps_widget.value,
             'battery_required': battery_required_widget.value,
             'rng_seed': (None if rng_seed_widget.value == 0 else rng_seed_widget.value),
             # Felder-Positionen

@@ -161,6 +161,7 @@ class InteractiveGridEnv:
         img = Image.new("RGBA", (W, H), "white")
         draw = ImageDraw.Draw(img)
 
+        """
         # wähle colour-emoji font basierend auf Betriebssystem
         if sys.platform.startswith("win"):
             font_path = Path(r"C:\Windows\Fonts\seguiemj.ttf")
@@ -176,6 +177,19 @@ class InteractiveGridEnv:
             l, t, rbb, bbb = draw.textbbox((0, 0), g, font=font, embedded_color=True)
             w, h = rbb - l, bbb - t
             draw.text((cx - w / 2 - l, cy - h / 2 - t), g, font=font, embedded_color=True)
+        """
+
+        # --- pick a robust font (color if available, else monochrome/dejavu) ---
+        from ._render import _resolve_font
+        font, is_color = _resolve_font(int(cs * 0.8))
+
+        # Draw centered glyph with correct embedded_color flag
+        def _draw_centered(glyph, cx, cy):
+            g = glyph.replace("\uFE0F", "")
+            l, t, rbb, bbb = draw.textbbox((0, 0), g, font=font, embedded_color=is_color)
+            w, h = rbb - l, bbb - t
+            draw.text((cx - w / 2 - l, cy - h / 2 - t), g, font=font, embedded_color=is_color)
+
 
         # zeichne Hintergrundfarben der Felder
         for r in range(R):
@@ -456,6 +470,9 @@ class ExtendedGridEnv(LargeGridEnv):
                  reward_sticky=-1.0,
                  reward_trampoline=1.0,
                  reward_toll=-3.0,
+                 reward_jewel_pos=3.0,
+                 reward_jewel_neg=-1.0,
+                 jewel_steps=5,
                  battery_required=False,
                  goal_position=None,
                  rng_seed=None):
@@ -501,6 +518,10 @@ class ExtendedGridEnv(LargeGridEnv):
         self.reward_trampoline = reward_trampoline
         self.reward_toll = reward_toll
 
+        self.reward_jewel_pos = reward_jewel_pos
+        self.reward_jewel_neg = reward_jewel_neg
+        self.jewel_steps = jewel_steps
+
         self.battery_required = battery_required
         self.has_battery = False
 
@@ -529,6 +550,7 @@ class ExtendedGridEnv(LargeGridEnv):
         self.already_collapsed.clear()
         self.collapse_positions = self.collapse_positions_original.copy()
         self.skip_turns = 0
+        self.step_count = 0
         self.wind_dir_idx = self.rng.integers(0, 4)
         return super().reset()
 
@@ -645,7 +667,7 @@ class ExtendedGridEnv(LargeGridEnv):
 
         # Zeit-abhängiges Juwel
         if self.agent_pos in self.gem_positions:
-            bonus = 3 if self.step_count < 20 else -1
+            bonus = self.reward_jewel_pos if self.step_count < self.jewel_steps else self.reward_jewel_neg
             reward += bonus
             self.gem_positions.remove(self.agent_pos)
 

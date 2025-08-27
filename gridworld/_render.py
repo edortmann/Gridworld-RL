@@ -65,6 +65,7 @@ def _glyph_for(env, r, c):
 
 # Hilfsfunktionen für Video Frames
 
+"""
 # OS-specific colour emoji font
 def _default_emoji_font(px):
     if sys.platform.startswith("win"):
@@ -74,6 +75,57 @@ def _default_emoji_font(px):
     else:
         raise OSError("Add a colour-emoji font path for your OS")
     return ImageFont.truetype(str(fp), px)
+"""
+
+from typing import Tuple
+
+def _resolve_font(px: int) -> Tuple[ImageFont.FreeTypeFont, bool]:
+    """
+    Try fonts in a sensible order and return (font, is_color_font).
+    Falls back cleanly if a font rejects the requested size.
+    """
+    home = Path.home()
+    candidates = [
+        # Prefer monochrome first (most robust for Pillow)
+        home / ".local/share/fonts/NotoEmoji-Regular.ttf",
+        Path("/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf"),
+
+        # Color emoji fonts (may be picky about size on some builds)
+        home / ".local/share/fonts/NotoColorEmoji.ttf",
+        Path("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"),
+
+        # Windows (if someone runs this there)
+        Path(r"C:\Windows\Fonts\seguiemj.ttf"),
+
+        # Generic fallback: no emoji, but prevents crashes
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    ]
+
+    def _try_sizes(path: Path, base_px: int):
+        # If Pillow/FreeType says "invalid pixel size",
+        # try a set of common strike sizes before giving up.
+        safe_sizes = [base_px, 128, 96, 72, 64, 56, 48, 44, 40, 36, 32, 28, 26, 24, 22, 20, 18, 16]
+        last_err = None
+        for s in safe_sizes:
+            try:
+                return ImageFont.truetype(str(path), s), s
+            except OSError as e:
+                last_err = e
+        raise last_err  # bubble up the last error
+
+    for fp in candidates:
+        if not fp.exists():
+            continue
+        try:
+            fnt, used_px = _try_sizes(fp, px)
+            is_color = ("ColorEmoji" in fp.name or fp.name.lower() == "seguiemj.ttf")
+            return fnt, is_color
+        except OSError:
+            continue
+
+    # Last resort: Pillow's bitmap default
+    return ImageFont.load_default(), False
+
 
 
 def _emoji_frame(rows, cols, cell_px, border, symbols, agent_pos, font_path=None, agent_glyph="🤖"):
@@ -95,6 +147,7 @@ def _emoji_frame(rows, cols, cell_px, border, symbols, agent_pos, font_path=None
         x = border + c * cell_px
         draw.line([(x, border), (x, H - border)], fill="grey")
 
+    """
     # wähle font
     font = ImageFont.truetype(str(font_path), int(cell_px * 0.8)) if font_path else _default_emoji_font(
         int(cell_px * 0.8))
@@ -105,6 +158,19 @@ def _emoji_frame(rows, cols, cell_px, border, symbols, agent_pos, font_path=None
         l, t, rbb, bbb = draw.textbbox((0, 0), g, font=font, embedded_color=True)
         w, h = rbb - l, bbb - t
         draw.text((cx - w / 2 - l, cy - h / 2 - t), g, font=font, embedded_color=True)
+    """
+
+    # choose a font safely
+    font, is_color = _resolve_font(int(cell_px * 0.8))
+
+    # helper: draw centered text respecting color/mono font
+    def _draw_centered(glyph, cx, cy):
+        g = glyph.replace("\uFE0F", "")  # drop VS-16 for safety
+        l, t, rbb, bbb = draw.textbbox((0, 0), g, font=font, embedded_color=is_color)
+        w, h = rbb - l, bbb - t
+        draw.text((cx - w / 2 - l, cy - h / 2 - t), g, font=font, embedded_color=is_color)
+
+
 
     # zeichne emojis + agent
     if agent_pos:
