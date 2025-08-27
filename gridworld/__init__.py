@@ -1,3 +1,4 @@
+from .setup import setup
 from .envs import InteractiveGridEnv, LargeGridEnv, ExtendedGridEnv
 from .qlearning import q_learning
 from .ui import *
