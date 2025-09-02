@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 # ---------------------------
-# Settings (edit if you like)
+# Settings
 # ---------------------------
 REPO_URL="https://github.com/edortmann/Gridworld-RL"
 REPO_DIR="$HOME/Gridworld-RL"
@@ -99,7 +99,7 @@ log "Upgrading pip/setuptools/wheel in venv…"
 "$VENV_PY" -m pip install --upgrade pip setuptools wheel >/dev/null
 
 # ---------------------------
-# 3) Install JupyterLab + your requested packages (in venv)
+# 3) Install JupyterLab + requested packages (in venv)
 # ---------------------------
 log "Installing JupyterLab, widgets, ipykernel…"
 "$VENV_PY" -m pip install -U \
