@@ -30,8 +30,7 @@ For Linux users who want a one-command setup and launch:
 1. Install **Python 3.10–3.12**.
 2. Start **JupyterLab** (recommended) or **Jupyter Notebook**.
 3. Open **`gridworld.ipynb`**.
-4. Run the first **Setup** cell (it will install missing packages and assets into your environment).
-5. Run the dashboard cell and start experimenting!
+4. Run all cells and start experimenting!
 
 ### Linux (auto-setup)
 > No admin privileges required.
