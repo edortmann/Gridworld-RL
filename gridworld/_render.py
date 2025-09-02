@@ -1,34 +1,129 @@
+import os
 import sys
+from functools import lru_cache
 from pathlib import Path
+from typing import Dict, Tuple, Optional
 from PIL import Image, ImageDraw, ImageFont
 
+# =========================
+# Emoji + Symbols
+# =========================
 
-# Symbolverzeichnis für die Felder
-SYMBOLS = {
-    "agent"      : "🤖",
-    "start"      : "🔰",
-    "goal"       : "🚩",
-    "empty"      : "",
-    "wall"       : "🧱️",  #"⬛️",
-    "pit"        : "🕳️",
-    "ice"        : "❄️",  #"🧊",
-    "bumper"     : "🔴",  #"🪀️"
-    "sticky"     : "🟫",
-    "wind"       : "💨",
-    "conveyor_U" : "⬆️",
-    "conveyor_D" : "⬇️",
-    "conveyor_L" : "⬅️",
-    "conveyor_R" : "➡️",
-    "trampoline" : "🦘",  #"↕️",
-    "portal"     : "🌀",
-    "collapse"   : "⚠️",
-    "toll"       : "💰",
-    "battery"    : "🔋️",
-    "gem"        : "💎️",
+SYMBOLS: Dict[str, str] = {
+    "agent": "🤖",
+    "start": "🔰",
+    "goal": "🚩",
+    "empty": "",
+    "wall": "🚧",
+    "pit": "🕳️",
+    "ice": "❄️",
+    "bumper": "🔴",
+    "sticky": "👣",
+    "toll": "💰",
+    "battery": "🔋",
+    "gem": "💎",
+    "trampoline": "🦘",
+    "wind": "💨",
+    "collapse": "⚠️",
+    "portal": "🌀",
+    "conveyor_U": "⬆️",
+    "conveyor_D": "⬇️",
+    "conveyor_L": "⬅️",
+    "conveyor_R": "➡️",
 }
 
+_PRESET_RES = {"720p": (1280, 720), "1080p": (1920, 1080)}
+
+def _parse_resolution(res):
+    if res is None:
+        return None
+    if isinstance(res, str):
+        try:
+            return _PRESET_RES[res.lower()]
+        except KeyError:
+            raise ValueError(f"Unknown preset '{res}'. Use one of {list(_PRESET_RES)} or pass a (width, height) tuple.")
+    if len(res) == 2:
+        return tuple(map(int, res))
+    raise ValueError("Resolution must be '720p' / '1080p' / (width, height) / None")
+
+# =========================
+# Font helpers
+# =========================
+
+def _resolve_font(px: int) -> Tuple[ImageFont.FreeTypeFont, bool]:
+    """
+    Try fonts in a sensible order and return (font, is_color_font).
+    Avoids 'invalid pixel size' by probing safe sizes for bitmap/color fonts.
+    """
+    home = Path.home()
+    candidates = [
+        # Prefer color emoji first (if system supports it)
+        home / ".local/share/fonts/NotoColorEmoji.ttf",
+        Path("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"),
+        Path(r"C:\Windows\Fonts\seguiemj.ttf") if sys.platform.startswith("win") else None,
+
+        # Monochrome emoji fallback
+        home / ".local/share/fonts/NotoEmoji-Regular.ttf",
+        Path("/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf"),
+
+        # Generic fallback: no emoji, prevents crashes
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    ]
+
+    def _try_sizes(path: Path, base_px: int):
+        safe = [base_px, 128, 96, 72, 64, 56, 48, 44, 40, 36, 32, 28, 26, 24, 22, 20, 18, 16]
+        last = None
+        for s in safe:
+            try:
+                return ImageFont.truetype(str(path), s), s
+            except OSError as e:
+                last = e
+        raise last
+
+    for fp in candidates:
+        if not fp:
+            continue
+        if not fp.exists():
+            continue
+        try:
+            fnt, used_px = _try_sizes(fp, px)
+            is_color = ("ColorEmoji" in fp.name) or (fp.name.lower() == "seguiemj.ttf")
+            return fnt, is_color
+        except OSError:
+            continue
+
+    return ImageFont.load_default(), False
+
+# =========================
+# Sprite helpers (Twemoji fallback)
+# =========================
+
+SPRITE_DIR = Path(os.environ.get("GRIDWORLD_EMOJI_SPRITES", Path.home() / ".local" / "share" / "gridworld-emoji"))
+
+def _glyph_to_hex(glyph: str) -> str:
+    # remove emoji VS16 to match sprite filenames
+    cps = [f"{ord(ch):x}" for ch in glyph if ord(ch) not in (0xFE0F, 0xFE0E)]
+    return "-".join(cps)
+
+@lru_cache(maxsize=256)
+def _load_sprite_for_glyph(glyph: str) -> Optional[Image.Image]:
+    path = SPRITE_DIR / f"{_glyph_to_hex(glyph)}.png"
+    if path.exists():
+        try:
+            return Image.open(path).convert("RGBA")
+        except Exception:
+            return None
+    return None
+
+# expose for envs.py
+def get_sprite_for_glyph(glyph: str) -> Optional[Image.Image]:
+    return _load_sprite_for_glyph(glyph)
+
+# =========================
+# Symbol resolution
+# =========================
+
 def _symbol_for(env, r, c):
-    """Gibt den SYMBOLS‑Schlüssel für die Position (r,c) in *env* zurück."""
     pos = (r, c)
     if pos == env.start_pos: return "start"
     if pos == env.goal_pos: return "goal"
@@ -46,161 +141,81 @@ def _symbol_for(env, r, c):
     if pos in getattr(env, "battery_positions",    set()):  return "battery"
     if pos in getattr(env, "gem_positions",        set()):  return "gem"
 
-    # conveyor
     conv_dir = getattr(env, "conveyor_map", {}).get(pos)
     if conv_dir:
         return f"conveyor_{conv_dir}"
 
-    # portal
-    for a,b in getattr(env, "portal_pairs", []):
-        if pos in (a,b): return "portal"
+    for a, b in getattr(env, "portal_pairs", []):
+        if pos in (a, b): return "portal"
 
     return "empty"
 
-
-def _glyph_for(env, r, c):
+def _glyph_for(env, r, c) -> Optional[str]:
     key = _symbol_for(env, r, c)
     return SYMBOLS.get(key)
 
+# =========================
+# Frame rendering
+# =========================
 
-# Hilfsfunktionen für Video Frames
-
-"""
-# OS-specific colour emoji font
-def _default_emoji_font(px):
-    if sys.platform.startswith("win"):
-        fp = Path(r"C:\Windows\Fonts\seguiemj.ttf")
-    elif sys.platform.startswith("linux"):
-        fp = Path("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf")
-    else:
-        raise OSError("Add a colour-emoji font path for your OS")
-    return ImageFont.truetype(str(fp), px)
-"""
-
-from typing import Tuple
-
-def _resolve_font(px: int) -> Tuple[ImageFont.FreeTypeFont, bool]:
+def _emoji_frame(rows: int,
+                 cols: int,
+                 cell_size: int,
+                 padding: int,
+                 symbols: Dict[Tuple[int, int], str],
+                 agent: Optional[Tuple[int, int]] = None,
+                 agent_glyph: str = "🤖") -> Image.Image:
     """
-    Try fonts in a sensible order and return (font, is_color_font).
-    Falls back cleanly if a font rejects the requested size.
+    Create a PIL.Image of a board, drawing emojis centered in each cell.
+    symbols: dict mapping (r,c)->emoji glyph.
     """
-    home = Path.home()
-    candidates = [
-        # Prefer monochrome first (most robust for Pillow)
-        home / ".local/share/fonts/NotoEmoji-Regular.ttf",
-        Path("/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf"),
+    W = cols * cell_size + 2 * padding
+    H = rows * cell_size + 2 * padding
+    im = Image.new("RGBA", (W, H), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(im)
 
-        # Color emoji fonts (may be picky about size on some builds)
-        home / ".local/share/fonts/NotoColorEmoji.ttf",
-        Path("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"),
-
-        # Windows (if someone runs this there)
-        Path(r"C:\Windows\Fonts\seguiemj.ttf"),
-
-        # Generic fallback: no emoji, but prevents crashes
-        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-    ]
-
-    def _try_sizes(path: Path, base_px: int):
-        # If Pillow/FreeType says "invalid pixel size",
-        # try a set of common strike sizes before giving up.
-        safe_sizes = [base_px, 128, 96, 72, 64, 56, 48, 44, 40, 36, 32, 28, 26, 24, 22, 20, 18, 16]
-        last_err = None
-        for s in safe_sizes:
-            try:
-                return ImageFont.truetype(str(path), s), s
-            except OSError as e:
-                last_err = e
-        raise last_err  # bubble up the last error
-
-    for fp in candidates:
-        if not fp.exists():
-            continue
-        try:
-            fnt, used_px = _try_sizes(fp, px)
-            is_color = ("ColorEmoji" in fp.name or fp.name.lower() == "seguiemj.ttf")
-            return fnt, is_color
-        except OSError:
-            continue
-
-    # Last resort: Pillow's bitmap default
-    return ImageFont.load_default(), False
-
-
-
-def _emoji_frame(rows, cols, cell_px, border, symbols, agent_pos, font_path=None, agent_glyph="🤖"):
-    """
-    Zeichne Grid-Umgebung basierend auf den Argumenten.
-
-    symbols:     dict {(row, col): glyph}
-    agent_pos:   (row, col)
-    """
-    W, H = cols * cell_px + 2 * border, rows * cell_px + 2 * border
-    img = Image.new("RGBA", (W, H), "white")
-    draw = ImageDraw.Draw(img)
-
-    # grid lines
+    # grid
     for r in range(rows + 1):
-        y = border + r * cell_px
-        draw.line([(border, y), (W - border, y)], fill="grey")
+        y = padding + r * cell_size
+        draw.line([(padding, y), (padding + cols * cell_size, y)], fill=(180, 180, 180, 255), width=1)
     for c in range(cols + 1):
-        x = border + c * cell_px
-        draw.line([(x, border), (x, H - border)], fill="grey")
+        x = padding + c * cell_size
+        draw.line([(x, padding), (x, padding + rows * cell_size)], fill=(180, 180, 180, 255), width=1)
 
-    """
-    # wähle font
-    font = ImageFont.truetype(str(font_path), int(cell_px * 0.8)) if font_path else _default_emoji_font(
-        int(cell_px * 0.8))
+    # choose text font once
+    font, is_color = _resolve_font(int(cell_size * 0.8))
 
-    # Hilfsfunktion, um Emojis zentriert in Feldern zu zeichnen
-    def _draw_centered(glyph, cx, cy):
-        g = glyph.replace("\uFE0F", "")
-        l, t, rbb, bbb = draw.textbbox((0, 0), g, font=font, embedded_color=True)
-        w, h = rbb - l, bbb - t
-        draw.text((cx - w / 2 - l, cy - h / 2 - t), g, font=font, embedded_color=True)
-    """
+    def draw_centered_glyph(glyph: str, rc: Tuple[int, int]):
+        r, c = rc
+        if not glyph:
+            return
+        x0 = padding + c * cell_size
+        y0 = padding + r * cell_size
+        cx = x0 + cell_size / 2
+        cy = y0 + cell_size / 2
 
-    # choose a font safely
-    font, is_color = _resolve_font(int(cell_px * 0.8))
+        # Try sprite first
+        spr = get_sprite_for_glyph(glyph)
+        if spr is not None:
+            # keep aspect, fit into ~90% of cell
+            target = int(cell_size * 0.9)
+            if spr.width != target:
+                spr = spr.resize((target, target), Image.LANCZOS)
+            im.alpha_composite(spr, (int(cx - spr.width/2), int(cy - spr.height/2)))
+            return
 
-    # helper: draw centered text respecting color/mono font
-    def _draw_centered(glyph, cx, cy):
-        g = glyph.replace("\uFE0F", "")  # drop VS-16 for safety
+        # Fallback to font-rendered emoji/text
+        g = glyph  # keep VS-16; color fonts benefit from it
         l, t, rbb, bbb = draw.textbbox((0, 0), g, font=font, embedded_color=is_color)
         w, h = rbb - l, bbb - t
         draw.text((cx - w / 2 - l, cy - h / 2 - t), g, font=font, embedded_color=is_color)
 
-
-
-    # zeichne emojis + agent
-    if agent_pos:
-        symbols = dict(symbols)
-        symbols[agent_pos] = agent_glyph
-
+    # draw tiles
     for (r, c), glyph in symbols.items():
-        gx, gy = border + c * cell_px + cell_px // 2, border + r * cell_px + cell_px // 2
-        _draw_centered(glyph, gx, gy)
-        # draw.text((gx, gy),
-        #          glyph.replace("\uFE0F", ""),    # drop VS-16
-        #          font=font,
-        #          anchor="mm",
-        #          embedded_color=True)
-    return img
+        draw_centered_glyph(glyph, (r, c))
 
+    # draw agent last
+    if agent is not None:
+        draw_centered_glyph(agent_glyph, agent)
 
-_PRESET_RES = {"720p": (1280, 720), "1080p": (1920, 1080)}
-# Hilfsfunktion für die Auflösung der Videos
-def _parse_resolution(res):
-    """
-    Akzeptiert '720p', '1080p', ein (Breite, Höhe) Tupel oder None
-    """
-    if res is None:
-        return None
-    if isinstance(res, str):
-        try:
-            return _PRESET_RES[res.lower()]
-        except KeyError:
-            raise ValueError(f"Unknown preset '{res}'. Use one of {list(_PRESET_RES)} or pass a (width, height) tuple.")
-    if len(res) == 2:
-        return tuple(map(int, res))
-    raise ValueError("Auflösung muss sein '720p' / '1080p' / (Breite, Höhe) / None")
+    return im

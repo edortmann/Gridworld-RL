@@ -91,4 +91,67 @@ def setup():
     except Exception:
         pass
 
+
+    # --- Make installed emoji immediately visible in this kernel ---
+    FONT_DIR = Path.home() / ".local" / "share" / "fonts"
+    chosen = FONT_DIR / "NotoColorEmoji.ttf"
+    if not chosen.exists():
+        alt = FONT_DIR / "NotoEmoji-Regular.ttf"
+        if alt.exists():
+            chosen = alt
+    if chosen.exists():
+        os.environ["GRIDWORLD_EMOJI_FONT"] = str(chosen)
+
+    # --- Optional: prefer color emoji in general UI text via fontconfig (no sudo) ---
+    try:
+        conf_dir = Path.home() / ".config" / "fontconfig"
+        conf_dir.mkdir(parents=True, exist_ok=True)
+        fonts_conf = conf_dir / "fonts.conf"
+        fonts_conf.write_text("""<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+<fontconfig>
+  <alias><family>sans-serif</family><prefer><family>Noto Color Emoji</family></prefer></alias>
+  <alias><family>serif</family><prefer><family>Noto Color Emoji</family></prefer></alias>
+  <alias><family>monospace</family><prefer><family>Noto Color Emoji</family></prefer></alias>
+</fontconfig>""")
+        subprocess.run(["fc-cache", "-f"], check=False)
+    except Exception:
+        pass
+
+    # --- Download Twemoji sprites for all glyphs we use (robust fallback) ---
+    import urllib.request, json
+
+    SPRITE_DIR = Path.home() / ".local" / "share" / "gridworld-emoji"
+    SPRITE_DIR.mkdir(parents=True, exist_ok=True)
+    os.environ["GRIDWORLD_EMOJI_SPRITES"] = str(SPRITE_DIR)
+
+    def glyph_to_hex(g):
+        cps = []
+        for ch in g:
+            cp = ord(ch)
+            if cp in (0xFE0F, 0xFE0E):
+                continue
+            cps.append(f"{cp:x}")
+        return "-".join(cps)
+
+    glyphs = [
+        "🤖", "🔰", "🚩", "🚧", "🕳️", "❄️", "🔴", "👣", "💰", "🔋", "💎", "🦘", "💨", "⚠️", "🌀",
+        "⬆️", "⬇️", "⬅️", "➡️"
+    ]
+
+    base = "https://raw.githubusercontent.com/twitter/twemoji/v14.0.2/assets/72x72/{}.png"
+    for g in glyphs:
+        hexname = glyph_to_hex(g)
+        dest = SPRITE_DIR / f"{hexname}.png"
+        if dest.exists():
+            continue
+        try:
+            with urllib.request.urlopen(base.format(hexname)) as r:
+                data = r.read()
+            dest.write_bytes(data)
+            print(f"✅ sprite {g} -> {dest.name}")
+        except Exception as e:
+            print(f"⚠️ could not fetch sprite for {g} ({hexname}): {e}")
+
+
     print("Setup done.")

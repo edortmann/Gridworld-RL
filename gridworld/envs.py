@@ -1,4 +1,4 @@
-from ._render import SYMBOLS, _emoji_frame, _parse_resolution
+from ._render import SYMBOLS, _emoji_frame, _parse_resolution, _resolve_font, get_sprite_for_glyph
 import ipywidgets as widgets, numpy as np, sys, io, random
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
@@ -161,37 +161,7 @@ class InteractiveGridEnv:
         img = Image.new("RGBA", (W, H), "white")
         draw = ImageDraw.Draw(img)
 
-        """
-        # wähle colour-emoji font basierend auf Betriebssystem
-        if sys.platform.startswith("win"):
-            font_path = Path(r"C:\Windows\Fonts\seguiemj.ttf")
-        elif sys.platform.startswith("linux"):
-            font_path = Path("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf")
-        else:
-            raise OSError("add a colour-emoji font path for your OS")
-        font = ImageFont.truetype(str(font_path), int(cs * 0.8))
-
-        # Hilfsfunktion, um Emojis zentriert in Feldern zu zeichnen
-        def _draw_centered(glyph, cx, cy):
-            g = glyph.replace("\uFE0F", "")
-            l, t, rbb, bbb = draw.textbbox((0, 0), g, font=font, embedded_color=True)
-            w, h = rbb - l, bbb - t
-            draw.text((cx - w / 2 - l, cy - h / 2 - t), g, font=font, embedded_color=True)
-        """
-
-        # --- pick a robust font (color if available, else monochrome/dejavu) ---
-        from ._render import _resolve_font
-        font, is_color = _resolve_font(int(cs * 0.8))
-
-        # Draw centered glyph with correct embedded_color flag
-        def _draw_centered(glyph, cx, cy):
-            g = glyph.replace("\uFE0F", "")
-            l, t, rbb, bbb = draw.textbbox((0, 0), g, font=font, embedded_color=is_color)
-            w, h = rbb - l, bbb - t
-            draw.text((cx - w / 2 - l, cy - h / 2 - t), g, font=font, embedded_color=is_color)
-
-
-        # zeichne Hintergrundfarben der Felder
+        # Background tiles (visited shading)
         for r in range(R):
             for c in range(C):
                 x0, y0, x1, y1 = c * cs, r * cs, (c + 1) * cs - 1, (r + 1) * cs - 1
@@ -200,17 +170,38 @@ class InteractiveGridEnv:
                 else:
                     draw.rectangle([x0, y0, x1, y1], fill="white")
 
-        # zeichne Emojis
+        # Choose a text font once (fallback if no sprite)
+        font, is_color = _resolve_font(int(cs * 0.8))
+
+        def _draw_centered(glyph, cx, cy):
+            if not glyph:
+                return
+            spr = get_sprite_for_glyph(glyph)
+            if spr is not None:
+                target = int(cs * 0.9)
+                if spr.width != target:
+                    spr = spr.resize((target, target), Image.LANCZOS)
+                img.alpha_composite(spr, (int(cx - spr.width/2), int(cy - spr.height/2)))
+                return
+            # text fallback
+            g = glyph
+            l, t, rbb, bbb = draw.textbbox((0, 0), g, font=font, embedded_color=is_color)
+            w, h = rbb - l, bbb - t
+            draw.text((cx - w / 2 - l, cy - h / 2 - t), g, font=font, embedded_color=is_color)
+
+        # Draw emojis for tiles
         for r in range(R):
             for c in range(C):
                 key = ("goal" if (r, c) == self.goal_pos else self.tile_map.get((r, c)))
-                g = SYMBOLS.get(key)
-                if g and ((self.reveal_full) or ((r, c) in self.visited)):
-                    _draw_centered(g, c * cs + cs / 2, r * cs + cs / 2)
+                glyph = SYMBOLS.get(key)
+                if glyph and ((self.reveal_full) or ((r, c) in self.visited)):
+                    _draw_centered(glyph, c * cs + cs / 2, r * cs + cs / 2)
+
+        # Agent
         ar, ac = self.agent_pos
         _draw_centered(SYMBOLS["agent"], ac * cs + cs / 2, ar * cs + cs / 2)
 
-        # zeichne Felderränder
+        # Grid lines
         for r in range(R + 1):
             y = min(r * cs, H - 1)
             draw.line([(0, y), (W - 1, y)], fill="grey")
@@ -218,7 +209,8 @@ class InteractiveGridEnv:
             x = min(c * cs, W - 1)
             draw.line([(x, 0), (x, H - 1)], fill="grey")
 
-        # flush to widgets.Image
+        # Flush to widgets.Image
+        import io
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         self.canvas.value = buf.getvalue()
