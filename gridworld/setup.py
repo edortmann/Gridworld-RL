@@ -16,7 +16,7 @@ def setup():
         sh(sys.executable, "-m", "venv", str(VENV_DIR), "--upgrade-deps")
 
     # 2) Make sure pip/setuptools/wheel are up to date inside the venv
-    sh(VENV_PY, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel")
+    sh(VENV_PY, "-m", "pip", "install", "-q", "--upgrade", "pip", "setuptools", "wheel")
 
     # 3) Install all packages
     pkgs = [
@@ -29,7 +29,7 @@ def setup():
         "imageio[ffmpeg]",  # ensures ffmpeg binary via imageio-ffmpeg
         "ipykernel",
     ]
-    sh(VENV_PY, "-m", "pip", "install", *pkgs)
+    sh(VENV_PY, "-m", "pip", "install", "-q", *pkgs)
 
     # 4) Register Jupyter kernel
     sh(VENV_PY, "-m", "ipykernel", "install", "--user",
