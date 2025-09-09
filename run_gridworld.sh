@@ -36,7 +36,7 @@ PY
 }
 
 ensure_python_with_venv() {
-  # Return a python3 that can create venvs (printed on stdout). Reuse Miniforge if present.
+  # Return a python3 that can create venvs; reuse Miniforge if already installed.
   local py="${1:-$(command -v python3 || true)}"
   if [ -n "$py" ] && "$py" - <<'PY' >/dev/null 2>&1
 import sys, ensurepip; assert sys.version_info[:2] >= (3,8)
@@ -50,7 +50,7 @@ PY
     echo "$MINIFORGE_DIR/bin/python3"; return 0
   fi
 
-  log "System Python lacks ensurepip/venv — installing Miniforge in \$HOME."
+  log "System Python lacks ensurepip/venv — installing Miniforge to \$HOME"
   local arch="$(uname -m)" os="Linux" mf_url=""
   case "$arch" in
     x86_64)  mf_url="https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-${os}-x86_64.sh" ;;
@@ -65,7 +65,7 @@ PY
 }
 
 # ---------------------------
-# 1) Get a python that can create venvs (no sudo)
+# 1) Python with venv support (no sudo)
 # ---------------------------
 PY_BIN="$(ensure_python_with_venv)"
 log "Using Python at: $PY_BIN"
@@ -81,38 +81,41 @@ else
 fi
 
 VENV_PY="$VENV_DIR/bin/python"
-VENV_PIP="$VENV_DIR/bin/pip"
 
 log "Upgrading pip/setuptools/wheel in venv …"
-"$VENV_PY" -m pip install --upgrade pip setuptools wheel >/dev/null
+"$VENV_PY" -m pip install --quiet --upgrade pip setuptools wheel
+
+log "Installing JupyterLab & core libs …"
+"$VENV_PY" -m pip install -q -U jupyterlab ipywidgets jupyterlab_widgets widgetsnbextension ipykernel
+"$VENV_PY" -m pip install -q -U numpy matplotlib pillow plotly moviepy imageio imageio-ffmpeg
 
 # ---------------------------
-# 3) Install JupyterLab & essentials
-# ---------------------------
-log "Installing JupyterLab, widgets, ipykernel …"
-"$VENV_PY" -m pip install -U \
-  jupyterlab ipywidgets jupyterlab_widgets widgetsnbextension ipykernel >/dev/null
-
-# Optional but handy libs for the notebook
-"$VENV_PY" -m pip install -U numpy matplotlib pillow plotly moviepy imageio imageio-ffmpeg >/dev/null
-
-# ---------------------------
-# 4) Get or update the repo
+# 3) Repo: clone or force-update to origin (no stash)
 # ---------------------------
 if have git; then
   if [ -d "$REPO_DIR/.git" ]; then
-    log "Updating Git repo at $REPO_DIR"
-    git -C "$REPO_DIR" remote get-url origin >/dev/null 2>&1 || git -C "$REPO_DIR" remote add origin "$REPO_URL".git
-    git -C "$REPO_DIR" fetch --all --tags
-    # Pull on current branch (tracks origin/<branch> if set)
-    if ! git -C "$REPO_DIR" pull --rebase; then
-      warn "git pull failed (local changes?). Trying a safer fast-forward."
-      git -C "$REPO_DIR" merge --ff-only || warn "Fast-forward failed; please resolve manually."
+    log "Updating Git repo at $REPO_DIR (discarding local changes to tracked files)"
+    # ensure origin points to the right URL
+    if ! git -C "$REPO_DIR" remote get-url origin >/dev/null 2>&1; then
+      git -C "$REPO_DIR" remote add origin "$REPO_URL".git
     fi
+    git -C "$REPO_DIR" remote set-url origin "$REPO_URL".git || true
+    git -C "$REPO_DIR" fetch --all --tags --prune
+    # detect default branch
+    head_branch="$(git -C "$REPO_DIR" remote show origin | sed -n 's/ *HEAD branch: //p')"
+    [ -n "$head_branch" ] || head_branch="main"
+    # ensure branch exists locally and is checked out
+    if ! git -C "$REPO_DIR" show-ref --verify --quiet "refs/heads/$head_branch"; then
+      git -C "$REPO_DIR" checkout -B "$head_branch" "origin/$head_branch" || git -C "$REPO_DIR" checkout -B "$head_branch" "origin/master"
+    else
+      git -C "$REPO_DIR" checkout "$head_branch"
+    fi
+    # hard reset to remote (no stash, no merge)
+    git -C "$REPO_DIR" reset --hard "origin/$head_branch"
+    # (optional) clean untracked files/dirs; commented to avoid deleting user files
+    # git -C "$REPO_DIR" clean -fd
   elif [ -d "$REPO_DIR" ]; then
-    # Folder exists but isn't a git repo (e.g., from zip). Back it up and clone cleanly.
-    ts="$(date +%Y%m%d-%H%M%S)"
-    bak="${REPO_DIR}.bak-${ts}"
+    ts="$(date +%Y%m%d-%H%M%S)"; bak="${REPO_DIR}.bak-${ts}"
     warn "Existing non-git folder at $REPO_DIR — moving to $bak"
     mv "$REPO_DIR" "$bak"
     log "Cloning repo to $REPO_DIR"
@@ -125,23 +128,21 @@ else
   # No git available: download zip and atomically replace folder
   log "git not found — using zip download."
   tmpzip="$(mktemp --suffix=.zip)"
-  # try main first; fallback to master
   if ! download "$REPO_URL/archive/refs/heads/main.zip" "$tmpzip"; then
     download "$REPO_URL/archive/refs/heads/master.zip" "$tmpzip"
   fi
   tmpdir="$(mktemp -d)"
   "$VENV_PY" - <<PY "$tmpzip" "$tmpdir"
 import sys,zipfile,os
-zip_path, outdir = sys.argv[1], sys.argv[2]
-with zipfile.ZipFile(zip_path) as z:
-    z.extractall(outdir)
+zip_path,outdir=sys.argv[1],sys.argv[2]
+with zipfile.ZipFile(zip_path) as z: z.extractall(outdir)
 print(next(p for p in os.listdir(outdir) if os.path.isdir(os.path.join(outdir,p))))
 PY
   topdir="$tmpdir/$(ls -1 "$tmpdir" | head -n1)"
-  # Atomic-ish replace: move old to backup, then move new into place
+  # Replace existing folder (keep a timestamped backup)
   if [ -e "$REPO_DIR" ]; then
     ts="$(date +%Y%m%d-%H%M%S)"; bak="${REPO_DIR}.bak-${ts}"
-    warn "Replacing existing $REPO_DIR (no git). Backup at $bak"
+    warn "Replacing existing $REPO_DIR (zip mode). Backup at $bak"
     rm -rf "$bak"; mv "$REPO_DIR" "$bak"
   fi
   mv "$topdir" "$REPO_DIR"
@@ -151,24 +152,19 @@ fi
 cd "$REPO_DIR"
 
 # ---------------------------
-# 5) Install repo requirements (if present) into the venv
+# 4) Install repo requirements (if present)
 # ---------------------------
 if [ -f requirements.txt ]; then
   log "Installing Python dependencies from requirements.txt …"
-  "$VENV_PY" -m pip install -r requirements.txt
+  "$VENV_PY" -m pip install -q -r requirements.txt
 fi
 
 # ---------------------------
-# 6) Register/re-register the venv as a Jupyter kernel
+# 5) Register kernel (safe to repeat) & launch JupyterLab
 # ---------------------------
 log "Registering Jupyter kernel: $KERNEL_NAME"
-"$VENV_PY" -m ipykernel install --user \
-  --name "$KERNEL_NAME" \
-  --display-name "$KERNEL_DISPLAY" >/dev/null
+"$VENV_PY" -m ipykernel install --user --name "$KERNEL_NAME" --display-name "$KERNEL_DISPLAY" >/dev/null
 
-# ---------------------------
-# 7) Launch JupyterLab from the venv
-# ---------------------------
 NB_TO_OPEN="$TARGET_NOTEBOOK"
 if [ ! -f "$NB_TO_OPEN" ]; then
   NB_TO_OPEN="$(ls -1 *.ipynb 2>/dev/null | grep -E '^gridworld.*\.ipynb$' | head -n1 || true)"
