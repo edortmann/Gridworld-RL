@@ -232,6 +232,7 @@ def launch_training_lab():
     _widget_vars = {name: obj for name, obj in locals().items() if name.endswith("_widget") and hasattr(obj, "value")}
     _default_values = {name: w.value for name, w in _widget_vars.items()}
     _default_tile_grid = [[""] * cols_widget.value for _ in range(rows_widget.value)]
+    _default_tile_grid[-1][-1] = "Ziel"
 
     preset_configs = {
         "Default": {
