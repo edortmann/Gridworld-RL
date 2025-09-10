@@ -117,13 +117,14 @@ def create_tile_selectors(rows, cols, preset, preset_configs):
     return selectors_2d, widgets.VBox(grid_rows)
 
 
-def create_tile_selectors_based_only_on_rowscols(rows, cols, tile_list):
+def create_tile_selectors_based_only_on_rowscols(rows, cols):
     """
     Erstellt ein 2D-Gitter mit Dropdown-Widgets (eines pro Feld).
     Gibt dieses als Liste von Listen zurück, zusammen mit einer VBox, die diese visuell anordnet.
     """
-    # get current tile grid
-    tg = tile_list
+    # set default tile grid but with new selected dimensions
+    tg = [[""] * cols for _ in range(rows)]
+    tg[-1][-1] = "Ziel"
 
     tile_types = ["", "Abpraller", "Batterie", "Einstürzender Boden", "Eis", "Förderband (links)", "Förderband (oben)",
                   "Förderband (rechts)", "Förderband (unten)", "Grube", "Klebriger Schlamm", "Mauer",
@@ -449,10 +450,10 @@ def launch_training_lab():
         rows = rows_widget.value
         cols = cols_widget.value
 
-        tile_selectors = _get_current_tile_grid()
+        #tile_selectors = _get_current_tile_grid()
 
         # Tile‑Dropdowns neu aufbauen
-        tile_selectors, grid_vbox = create_tile_selectors_based_only_on_rowscols(rows, cols, tile_selectors)
+        tile_selectors, grid_vbox = create_tile_selectors_based_only_on_rowscols(rows, cols)
 
         tile_grid_container.children = [grid_vbox]
 
