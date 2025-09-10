@@ -733,8 +733,14 @@ def launch_training_lab():
     replay_button.on_click(on_replay_button_clicked)
     test_button.on_click(on_test_button_clicked)
 
+    # Extra Button um Felderauswahl an Rows/Cols Parameter anzupassen
+    grid_apply_btn = widgets.Button(description="Passe Anz. Zeilen/Spalten an gesetzte Werte an", button_style="success")
+    grid_apply_btn.on_click(update_tile_grid(None))
+
+    grid_box = widgets.VBox([rows_row, cols_row, grid_apply_btn, tile_grid_container])
+
     # Boxen in ein Tab-Widget einbinden
-    tab = widgets.Tab(children=[env_parameters_box, tile_grid_container, agent_parameters_box, video_parameters_box])
+    tab = widgets.Tab(children=[env_parameters_box, grid_box, agent_parameters_box, video_parameters_box])
     tab.set_title(0, "Umgebung")
     tab.set_title(1, "Felder")
     tab.set_title(2, "Agent")
