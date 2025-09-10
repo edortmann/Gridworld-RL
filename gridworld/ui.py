@@ -95,7 +95,7 @@ def create_tile_selectors(rows, cols, preset, preset_configs):
     else:  # pad / crop if size differs
         tg = [
             [
-                tg[r][c] if r < len(tg) and c < len(tg[r]) else "Empty"
+                tg[r][c] if r < len(tg) and c < len(tg[r]) else ""
                 for c in range(cols)
             ]
             for r in range(rows)
@@ -784,7 +784,7 @@ def launch_training_lab():
 
     # Extra Button um Felderauswahl an Rows/Cols Parameter anzupassen
     grid_apply_btn = widgets.Button(description="Passe Anz. Zeilen/Spalten an gesetzte Werte an", button_style="success", layout=widgets.Layout(width='500px'))
-    grid_apply_btn.on_click(update_tile_grid_based_only_on_rowscols(None))
+    grid_apply_btn.on_click(update_tile_grid_based_only_on_rowscols)
 
     grid_box = widgets.VBox([rows_row, cols_row, grid_apply_btn, tile_grid_container])
 
