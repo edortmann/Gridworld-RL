@@ -1,6 +1,5 @@
 import numpy as np
 import ipywidgets as widgets
-import copy
 from IPython.display import display
 from PIL import Image
 from contextlib import ExitStack
@@ -434,13 +433,6 @@ def launch_training_lab():
         tile_grid_container.children = [grid_vbox]
 
 
-    def _get_current_tile_grid():
-        """Return a deep copy of the tile names currently selected in the UI"""
-        try:
-            return copy.deepcopy([[dd.value for dd in row] for row in tile_selectors])
-        except NameError:
-            return [["Empty"] * cols_widget.value for _ in range(rows_widget.value)]
-
     def update_tile_grid_based_only_on_rowscols(_):
         """
         Erstellt das 2D-Raster der Kachelselektoren neu, wenn sich auf den Button "Passe Anz. Zeilen/Spalten an gesetzte Werte an".
@@ -450,12 +442,39 @@ def launch_training_lab():
         rows = rows_widget.value
         cols = cols_widget.value
 
-        #tile_selectors = _get_current_tile_grid()
+        # read existing values (if any)
+        old = [[dd.value for dd in row] for row in tile_selectors] if tile_selectors else []
 
-        # Tile‑Dropdowns neu aufbauen
-        tile_selectors, grid_vbox = create_tile_selectors_based_only_on_rowscols(rows, cols)
+        # new target grid (prefill empty)
+        new_vals = [[""] * cols for _ in range(rows)]
 
-        tile_grid_container.children = [grid_vbox]
+        # copy overlap
+        for r in range(min(rows, len(old))):
+            for c in range(min(cols, len(old[r]))):
+                new_vals[r][c] = old[r][c]
+
+        # ensure at least one goal exists
+        if not any("Ziel" in row for row in new_vals):
+            new_vals[-1][-1] = "Ziel"
+
+        # rebuild dropdown widgets from new_vals
+        tile_types = ["", "Abpraller", "Batterie", "Einstürzender Boden", "Eis",
+                      "Förderband (links)", "Förderband (oben)", "Förderband (rechts)", "Förderband (unten)",
+                      "Grube", "Klebriger Schlamm", "Mauer", "Maut-Tor", "Portal", "Start",
+                      "Trampolin", "Wind", "Zeit-Juwel", "Ziel"]
+        dd_layout = widgets.Layout(width='130px')
+
+        selectors_2d, grid_rows = [], []
+        for r in range(rows):
+            row_selectors = [
+                widgets.Dropdown(options=tile_types, value=new_vals[r][c], description='', layout=dd_layout)
+                for c in range(cols)]
+            selectors_2d.append(row_selectors)
+            grid_rows.append(widgets.HBox(row_selectors))
+
+        tile_selectors = selectors_2d
+        tile_grid_container.children = [widgets.VBox(grid_rows)]
+
 
     # Änderungen an Zeilen/Spalten beobachten, um die Kachelmatrix neu aufzubauen
     #rows_widget.observe(update_tile_grid, names='value')
