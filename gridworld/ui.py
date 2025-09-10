@@ -364,22 +364,22 @@ def launch_training_lab():
 
         # finde passende Nummer zum Abspeichern
         custom_ids = [
-            int(key.split("Custom Preset ")[1])
+            int(key.split("Vorlage ")[1])
             for key in preset_configs
-            if key.startswith("Custom Preset ") and key.split("Custom Preset ")[1].isdigit()
+            if key.startswith("Vorlage ") and key.split("Vorlage ")[1].isdigit()
         ]
         next_id = max(custom_ids, default=0) + 1
-        preset_name = f"Custom Preset {next_id}"
+        preset_name = f"Vorlage {next_id}"
 
         # speichere Preset und aktualisiere Liste
         preset_configs[preset_name] = cfg
         preset_dropdown.options = list(preset_configs.keys())
         preset_dropdown.value = preset_name
 
-    preset_dropdown = widgets.Dropdown(options=list(preset_configs.keys()), value="Default", description="Umgebungs-Preset:", style={'description_width': 'initial'})
-    apply_btn = widgets.Button(description="Anwenden", button_style="success", tooltip="Ausgewähltes Preset anwenden")
-    reset_btn = widgets.Button(description="Zurücksetzen", button_style="warning", tooltip="Auf Standard zurücksetzen")
-    save_btn = widgets.Button(description="Speichern als Custom Preset", tooltip="Aktuelle Einstellungen als neues Preset sichern", icon="save", layout=widgets.Layout(width='300px'))
+    preset_dropdown = widgets.Dropdown(options=list(preset_configs.keys()), value="Default", description="Vorlage", style={'description_width': 'initial'})
+    apply_btn = widgets.Button(description="Vorlage anwenden", button_style="success", tooltip="Ausgewählte Vorlage anwenden")
+    reset_btn = widgets.Button(description="Alles zurücksetzen", button_style="warning", tooltip="Alle Werte auf Standard zurücksetzen")
+    save_btn = widgets.Button(description="Eigene Vorlage speichern", tooltip="Aktuelle Einstellungen als neue Vorlage sichern", icon="save", layout=widgets.Layout(width='300px'))
 
     apply_btn.on_click(lambda b: _apply_preset(preset_dropdown.value))
     reset_btn.on_click(lambda b: _apply_preset("Default"))
