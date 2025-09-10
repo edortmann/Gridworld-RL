@@ -1,5 +1,6 @@
 import numpy as np
 import ipywidgets as widgets
+import copy
 from IPython.display import display
 from PIL import Image
 from contextlib import ExitStack
@@ -115,6 +116,32 @@ def create_tile_selectors(rows, cols, preset, preset_configs):
         grid_rows.append(widgets.HBox(row_selectors))
     return selectors_2d, widgets.VBox(grid_rows)
 
+
+def create_tile_selectors_based_only_on_rowscols(rows_widget, cols_widget, tile_selectors):
+    """
+    Erstellt ein 2D-Gitter mit Dropdown-Widgets (eines pro Feld).
+    Gibt dieses als Liste von Listen zurück, zusammen mit einer VBox, die diese visuell anordnet.
+    """
+    # get current tile grid
+    try:
+        tg = copy.deepcopy([[dd.value for dd in row] for row in tile_selectors])
+    except NameError:
+        tg =  [["Empty"] * cols_widget.value for _ in range(rows_widget.value)]
+
+    tile_types = ["", "Abpraller", "Batterie", "Einstürzender Boden", "Eis", "Förderband (links)", "Förderband (oben)",
+                  "Förderband (rechts)", "Förderband (unten)", "Grube", "Klebriger Schlamm", "Mauer",
+                  "Maut-Tor", "Portal", "Start", "Trampolin", "Wind", "Zeit-Juwel", "Ziel"]
+    dd_layout = widgets.Layout(width='130px')  # erhöhte Breite, damit lange Namen nicht abgeschnitten werden
+
+    grid_rows, selectors_2d = [], []
+    for r in range(rows_widget.value):
+        row_selectors = [
+            widgets.Dropdown(options=tile_types, value=tg[r][c], description='', layout=dd_layout)
+            for c in range(cols_widget.value)
+        ]
+        selectors_2d.append(row_selectors)
+        grid_rows.append(widgets.HBox(row_selectors))
+    return selectors_2d, widgets.VBox(grid_rows)
 
 # ───────────────────────────────────────────
 #  LARGE TRAINING DASHBOARD
@@ -408,10 +435,21 @@ def launch_training_lab():
 
         tile_grid_container.children = [grid_vbox]
 
+    def update_tile_grid_based_only_on_rowscols(_):
+        """
+        Erstellt das 2D-Raster der Kachelselektoren neu, wenn sich auf den Button "Passe Anz. Zeilen/Spalten an gesetzte Werte an".
+        """
+        nonlocal tile_selectors
+
+        # Tile‑Dropdowns neu aufbauen
+        tile_selectors, grid_vbox = create_tile_selectors_based_only_on_rowscols(rows_widget, cols_widget, tile_selectors)
+
+        tile_grid_container.children = [grid_vbox]
+
     # Änderungen an Zeilen/Spalten beobachten, um die Kachelmatrix neu aufzubauen
-    rows_widget.observe(update_tile_grid, names='value')
-    cols_widget.observe(update_tile_grid, names='value')
-    preset_dropdown.observe(update_tile_grid, names='value')
+    #rows_widget.observe(update_tile_grid, names='value')
+    #cols_widget.observe(update_tile_grid, names='value')
+    #preset_dropdown.observe(update_tile_grid, names='value')
 
     # Die Kachelmatrix einmalig beim Start initialisieren
     update_tile_grid(None)
@@ -734,8 +772,8 @@ def launch_training_lab():
     test_button.on_click(on_test_button_clicked)
 
     # Extra Button um Felderauswahl an Rows/Cols Parameter anzupassen
-    grid_apply_btn = widgets.Button(description="Passe Anz. Zeilen/Spalten an gesetzte Werte an", button_style="success")
-    grid_apply_btn.on_click(update_tile_grid(None))
+    grid_apply_btn = widgets.Button(description="Passe Anz. Zeilen/Spalten an gesetzte Werte an", button_style="success", layout=widgets.Layout(width='500px'))
+    grid_apply_btn.on_click(update_tile_grid_based_only_on_rowscols(None))
 
     grid_box = widgets.VBox([rows_row, cols_row, grid_apply_btn, tile_grid_container])
 
