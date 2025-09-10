@@ -117,16 +117,13 @@ def create_tile_selectors(rows, cols, preset, preset_configs):
     return selectors_2d, widgets.VBox(grid_rows)
 
 
-def create_tile_selectors_based_only_on_rowscols(rows_widget, cols_widget, tile_selectors):
+def create_tile_selectors_based_only_on_rowscols(rows, cols, tile_list):
     """
     Erstellt ein 2D-Gitter mit Dropdown-Widgets (eines pro Feld).
     Gibt dieses als Liste von Listen zurück, zusammen mit einer VBox, die diese visuell anordnet.
     """
     # get current tile grid
-    try:
-        tg = copy.deepcopy([[dd.value for dd in row] for row in tile_selectors])
-    except NameError:
-        tg =  [["Empty"] * cols_widget.value for _ in range(rows_widget.value)]
+    tg = tile_list
 
     tile_types = ["", "Abpraller", "Batterie", "Einstürzender Boden", "Eis", "Förderband (links)", "Förderband (oben)",
                   "Förderband (rechts)", "Förderband (unten)", "Grube", "Klebriger Schlamm", "Mauer",
@@ -134,10 +131,10 @@ def create_tile_selectors_based_only_on_rowscols(rows_widget, cols_widget, tile_
     dd_layout = widgets.Layout(width='130px')  # erhöhte Breite, damit lange Namen nicht abgeschnitten werden
 
     grid_rows, selectors_2d = [], []
-    for r in range(rows_widget.value):
+    for r in range(rows):
         row_selectors = [
             widgets.Dropdown(options=tile_types, value=tg[r][c], description='', layout=dd_layout)
-            for c in range(cols_widget.value)
+            for c in range(cols)
         ]
         selectors_2d.append(row_selectors)
         grid_rows.append(widgets.HBox(row_selectors))
@@ -435,11 +432,24 @@ def launch_training_lab():
 
         tile_grid_container.children = [grid_vbox]
 
+
+    def _get_current_tile_grid():
+        """Return a deep copy of the tile names currently selected in the UI"""
+        try:
+            return copy.deepcopy([[dd.value for dd in row] for row in tile_selectors])
+        except NameError:
+            return [["Empty"] * cols_widget.value for _ in range(rows_widget.value)]
+
     def update_tile_grid_based_only_on_rowscols(_):
         """
         Erstellt das 2D-Raster der Kachelselektoren neu, wenn sich auf den Button "Passe Anz. Zeilen/Spalten an gesetzte Werte an".
         """
         nonlocal tile_selectors
+
+        rows = rows_widget.value
+        cols = cols_widget.value
+
+        tile_selectors = _get_current_tile_grid()
 
         # Tile‑Dropdowns neu aufbauen
         tile_selectors, grid_vbox = create_tile_selectors_based_only_on_rowscols(rows_widget, cols_widget, tile_selectors)
