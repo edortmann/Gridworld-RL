@@ -452,7 +452,7 @@ def launch_training_lab():
         tile_selectors = _get_current_tile_grid()
 
         # Tile‑Dropdowns neu aufbauen
-        tile_selectors, grid_vbox = create_tile_selectors_based_only_on_rowscols(rows_widget, cols_widget, tile_selectors)
+        tile_selectors, grid_vbox = create_tile_selectors_based_only_on_rowscols(rows, cols, tile_selectors)
 
         tile_grid_container.children = [grid_vbox]
 
